@@ -428,23 +428,9 @@ get_os() {
     # just the output of "uname -s".
     case $kernel_name in
         Darwin)   os=$darwin_name ;;
-        SunOS)    os=Solaris ;;
-        Haiku)    os=Haiku ;;
-        MINIX)    os=MINIX ;;
-        AIX)      os=AIX ;;
-        IRIX*)    os=IRIX ;;
-        FreeMiNT) os=FreeMiNT ;;
-
+        
         Linux|GNU*)
             os=Linux
-        ;;
-
-        *BSD|DragonFly|Bitrig)
-            os=BSD
-        ;;
-
-        CYGWIN*|MSYS*|MINGW*)
-            os=Windows
         ;;
 
         *)
@@ -489,21 +475,6 @@ get_distro() {
                 for release_file in /etc/*-release; do
                     distro+=$(< "$release_file")
                 done
-
-                if [[ -z $distro ]]; then
-                    case $distro_shorthand in
-                        on|tiny) distro=$kernel_name ;;
-                        *) distro="$kernel_name $kernel_version" ;;
-                    esac
-
-                    distro=${distro/DragonFly/DragonFlyBSD}
-
-                    # Workarounds for some BSD based distros.
-                    [[ -f /etc/pcbsd-lang ]]       && distro=PCBSD
-                    [[ -f /etc/trueos-lang ]]      && distro=TrueOS
-                    [[ -f /etc/pacbsd-release ]]   && distro=PacBSD
-                    [[ -f /etc/hbsd-update.conf ]] && distro=HardenedBSD
-                fi
             fi
 
             distro=$(trim_quotes "$distro")
@@ -525,15 +496,6 @@ get_distro() {
 
         "Mac OS X"|"macOS")
             case $osx_version in
-                10.4*)  codename="Mac OS X Tiger" ;;
-                10.5*)  codename="Mac OS X Leopard" ;;
-                10.6*)  codename="Mac OS X Snow Leopard" ;;
-                10.7*)  codename="Mac OS X Lion" ;;
-                10.8*)  codename="OS X Mountain Lion" ;;
-                10.9*)  codename="OS X Mavericks" ;;
-                10.10*) codename="OS X Yosemite" ;;
-                10.11*) codename="OS X El Capitan" ;;
-                10.12*) codename="macOS Sierra" ;;
                 10.13*) codename="macOS High Sierra" ;;
                 10.14*) codename="macOS Mojave" ;;
                 10.15*) codename="macOS Catalina" ;;
@@ -626,7 +588,6 @@ get_model() {
     model=${model//Type1ProductConfigId}
     model=${model//INVALID}
     model=${model//All Series}
-    model=${model//�}
 
     case $model in
         "Standard PC"*) model="KVM/QEMU (${model})" ;;
@@ -755,47 +716,15 @@ get_shell() {
     shell=${shell/\(*\)}
 }
 
-get_de() {
-    ((de_run == 1)) && return
-    de=Unknown
-    de_run=1
-}
-
-get_wm() {
-    wm=Unknown
-    wm_run=1
-}
-
-get_wm_theme() {
-    wm_theme=Unknown
-}
-
 get_cpu() {
     case $os in
         "Linux" | "MINIX" | "Windows")
             # Get CPU name.
             cpu_file="/proc/cpuinfo"
 
-            case $kernel_machine in
-                "frv" | "hppa" | "m68k" | "openrisc" | "or"* | "powerpc" | "ppc"* | "sparc"*)
-                    cpu="$(awk -F':' '/^cpu\t|^CPU/ {printf $2; exit}' "$cpu_file")"
-                ;;
-
-                "s390"*)
-                    cpu="$(awk -F'=' '/machine/ {print $4; exit}' "$cpu_file")"
-                ;;
-
-                "ia64" | "m32r")
-                    cpu="$(awk -F':' '/model/ {print $2; exit}' "$cpu_file")"
-                    [[ -z "$cpu" ]] && cpu="$(awk -F':' '/family/ {printf $2; exit}' "$cpu_file")"
-                ;;
-
-                *)
-                    cpu="$(awk -F '\\s*: | @' \
-                            '/model name|Hardware|Processor|^cpu model|chip type|^cpu type/ {
-                            cpu=$2; if ($1 == "Hardware") exit } END { print cpu }' "$cpu_file")"
-                ;;
-            esac
+            cpu="$(awk -F '\\s*: | @' \
+                    '/model name|Hardware|Processor|^cpu model|chip type|^cpu type/ {
+                    cpu=$2; if ($1 == "Hardware") exit } END { print cpu }' "$cpu_file")"
 
             speed_dir="/sys/devices/system/cpu/cpu0/cpufreq"
 
@@ -809,58 +738,16 @@ get_cpu() {
             done
 
             # Get CPU speed.
-            if [[ -d "$speed_dir" ]]; then
-                # Fallback to bios_limit if $speed_type fails.
-                speed="$(< "${speed_dir}/${speed_type}")" ||\
-                speed="$(< "${speed_dir}/bios_limit")" ||\
-                speed="$(< "${speed_dir}/scaling_max_freq")" ||\
-                speed="$(< "${speed_dir}/cpuinfo_max_freq")"
-                speed="$((speed / 1000))"
-
-            else
-                case $kernel_machine in
-                    "sparc"*)
-                        # SPARC systems use a different file to expose clock speed information.
-                        speed_file="/sys/devices/system/cpu/cpu0/clock_tick"
-                        speed="$(($(< "$speed_file") / 1000000))"
-                    ;;
-
-                    *)
-                        speed="$(awk -F ': |\\.' '/cpu MHz|^clock/ {printf $2; exit}' "$cpu_file")"
-                        speed="${speed/MHz}"
-                    ;;
-                esac
-            fi
-
-            # Get CPU temp.
-            [[ -f "$temp_dir" ]] && deg="$(($(< "$temp_dir") * 100 / 10000))"
+            speed="$(awk -F ': |\\.' '/cpu MHz|^clock/ {printf $2; exit}' "$cpu_file")"
+            speed="${speed/MHz}"
 
             # Get CPU cores.
-            case $kernel_machine in
-                "sparc"*)
-                    case $cpu_cores in
-                        # SPARC systems doesn't expose detailed topology information in
-                        # /proc/cpuinfo so I have to use lscpu here.
-                        "logical" | "on")
-                            cores="$(lscpu | awk -F ': *' '/^CPU\(s\)/ {print $2}')"
-                        ;;
-                        "physical")
-                            cores="$(lscpu | awk -F ': *' '/^Core\(s\) per socket/ {print $2}')"
-                            sockets="$(lscpu | awk -F ': *' '/^Socket\(s\)/ {print $2}')"
-                            cores="$((sockets * cores))"
-                        ;;
-                    esac
+            case $cpu_cores in
+                "logical" | "on")
+                    cores="$(grep -c "^processor" "$cpu_file")"
                 ;;
-
-                *)
-                    case $cpu_cores in
-                        "logical" | "on")
-                            cores="$(grep -c "^processor" "$cpu_file")"
-                        ;;
-                        "physical")
-                            cores="$(awk '/^core id/&&!a[$0]++{++i} END {print i}' "$cpu_file")"
-                        ;;
-                    esac
+                "physical")
+                    cores="$(awk '/^core id/&&!a[$0]++{++i} END {print i}' "$cpu_file")"
                 ;;
             esac
         ;;
@@ -1399,48 +1286,8 @@ get_cols() {
 # IMAGES
 
 image_backend() {
-    [[ "$image_backend" != "off" ]] && ! type -p convert &>/dev/null && \
-        { image_backend="ascii"; err "Image: Imagemagick not found, falling back to ascii mode."; }
-
-    case ${image_backend:-off} in
-        "ascii") print_ascii ;;
-        "off") image_backend="off" ;;
-
-        "caca" | "catimg" | "chafa" | "jp2a" | "iterm2" | "termpix" |\
-        "tycat" | "w3m" | "sixel" | "pixterm" | "kitty" | "pot", | "ueberzug" |\
-         "viu")
-            get_image_source
-
-            [[ ! -f "$image" ]] && {
-                to_ascii "Image: '$image_source' doesn't exist, falling back to ascii mode."
-                return
-            }
-            [[ "$image_backend" == "ueberzug" ]] && wait=true;
-
-            get_window_size
-
-            ((term_width < 1)) && {
-                to_ascii "Image: Failed to find terminal window size."
-                err "Image: Check the 'Images in the terminal' wiki page for more info,"
-                return
-            }
-
-            printf '\e[2J\e[H'
-            get_image_size
-            display_image || to_off "Image: $image_backend failed to display the image."
-        ;;
-
-        *)
-            err "Image: Unknown image backend specified '$image_backend'."
-            err "Image: Valid backends are: 'ascii', 'caca', 'catimg', 'chafa', 'jp2a', 'iterm2',
-                                            'kitty', 'off', 'sixel', 'pot', 'pixterm', 'termpix',
-                                            'tycat', 'w3m', 'viu')"
-            err "Image: Falling back to ascii mode."
-            print_ascii
-        ;;
-    esac
-
-    # Set cursor position next image/ascii.
+    image_backend=ascii_distro
+    print_ascii
     [[ "$image_backend" != "off" ]] && printf '\e[%sA\e[9999999D' "${lines:-0}"
 }
 
@@ -1485,48 +1332,6 @@ print_ascii() {
     printf '%b\n' "$ascii_data${reset}"
     LC_ALL=C
 }
-
-get_image_source() {
-    case $image_source in
-        "auto" | "wall" | "wallpaper")
-            get_wallpaper
-        ;;
-
-        *)
-            # Get the absolute path.
-            image_source="$(get_full_path "$image_source")"
-
-            if [[ -d "$image_source" ]]; then
-                shopt -s nullglob
-                files=("${image_source%/}"/*.{png,jpg,jpeg,jpe,gif,svg})
-                shopt -u nullglob
-                image="${files[RANDOM % ${#files[@]}]}"
-
-            else
-                image="$image_source"
-            fi
-        ;;
-    esac
-
-    err "Image: Using image '$image'"
-}
-
-
-to_ascii() {
-    err "$1"
-    image_backend="ascii"
-    print_ascii
-
-    # Set cursor position next image/ascii.
-    printf '\e[%sA\e[9999999D' "${lines:-0}"
-}
-
-to_off() {
-    err "$1"
-    image_backend="off"
-    text_padding=
-}
-
 
 # TEXT FORMATTING
 
@@ -1715,33 +1520,6 @@ err() {
 "
 }
 
-get_full_path() {
-    # This function finds the absolute path from a relative one.
-    # For example "Pictures/Wallpapers" --> "/home/dylan/Pictures/Wallpapers"
-
-    # If the file exists in the current directory, stop here.
-    [[ -f "${PWD}/${1}" ]] && { printf '%s\n' "${PWD}/${1}"; return; }
-
-    ! cd "${1%/*}" && {
-        err "Error: Directory '${1%/*}' doesn't exist or is inaccessible"
-        err "       Check that the directory exists or try another directory."
-        exit 1
-    }
-
-    local full_dir="${1##*/}"
-
-    # Iterate down a (possible) chain of symlinks.
-    while [[ -L "$full_dir" ]]; do
-        full_dir="$(readlink "$full_dir")"
-        cd "${full_dir%/*}" || exit
-        full_dir="${full_dir##*/}"
-    done
-
-    # Final directory.
-    full_dir="$(pwd -P)/${1/*\/}"
-
-    [[ -e "$full_dir" ]] && printf '%s\n' "$full_dir"
-}
 
 get_user_config() {
     # --config /path/to/config.conf
@@ -2004,11 +1782,6 @@ main() {
     old_functions
     print_info
     dynamic_prompt
-
-    # w3m-img: Draw the image a second time to fix
-    # rendering issues in specific terminal emulators.
-    [[ $image_backend == *w3m* ]] && display_image
-    [[ $image_backend == *ueberzug* ]] && display_image
 
     # Add neofetch info to verbose output.
     err "Neofetch command: $0 $*"
