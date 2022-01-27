@@ -1,0 +1,23 @@
+get_distro() {
+    if [ "$(uname -o)" = "GNU/Linux" ] ; then
+        if type -p lsb_release >/dev/null ; then
+            # "Ubuntu", "Debian", "CentOS", "RedHatEnterpriseServer"
+            distro=$(lsb_release -si)
+        fi
+        for file in /etc/lsb-release /usr/lib/os-release /etc/os-release; do
+            source "$file" && break
+        done
+        # "Ubuntu", "Debian GNU/Linux", "CentOS Linux", "Red Hat Enterprise Linux Server"
+        # "Alpine Linux", "Kali GNU/Linux", "SLES"
+        [ -z "$distro" ] && distro=$(NAME)
+        # CentOS: "7"
+        version=$(VERSION_ID)
+        if [ "${distro:0:6}" = "CentOS" ] ; then
+            if lsb_release -r ; then
+                long_version=$(lsb_release -r | awk '{print $2}')
+            else
+                long_version=$(cat /etc/redhat-release | awk -v FS='release ' '{print $2}' | awk '{print $1}')
+            fi
+        fi
+    fi
+}
