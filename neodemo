@@ -1,0 +1,121 @@
+#!/usr/bin/env bash
+read -rd '' config <<'EOF'
+print_info() {
+    info "CPU" cpu
+}
+EOF
+
+get_os() {
+    case $kernel_name in
+        Linux|GNU*)
+            os=Linux
+        ;;
+    esac
+}
+
+get_cpu() {
+    case $os in
+        "Linux" | "MINIX" | "Windows")
+            cpu_file="/proc/cpuinfo"
+            cpu="$(awk -F '\\s*: | @' \
+                    '/model name|Hardware|Processor|^cpu model|chip type|^cpu type/ {
+                    cpu=$2; if ($1 == "Hardware") exit } END { print cpu }' "$cpu_file")"
+        ;;
+    esac
+}
+
+info() {
+    # Save subtitle value.
+    [[ "$2" ]] && subtitle="$1"
+    unset -v prin
+
+    # Call the function.
+    "get_${2:-$1}"
+
+    # If the get_func function called 'prin' directly, stop here.
+    [[ "$prin" ]] && return
+
+    # Update the variable.
+    if [[ "$2" ]]; then
+        output="$(trim "${!2}")"
+    else
+        output="$(trim "${!1}")"
+    fi
+
+    if [[ "$2" && "${output// }" ]]; then
+        prin "$1" "$output"
+
+    elif [[ "${output// }" ]]; then
+        prin "$output"
+
+    else
+        err "Info: Couldn't detect ${1}."
+    fi
+
+    unset -v subtitle
+}
+
+prin() {
+    # If $2 doesn't exist we format $1 as info.
+    if [[ "$(trim "$1")" && "$2" ]]; then
+        [[ "$json" ]] && { printf '    %s\n' "\"${1}\": \"${2}\","; return; }
+
+        string="${1}${2:+: $2}"
+    else
+        string="${2:-$1}"
+        local subtitle_color="$info_color"
+    fi
+
+    string="$(trim "${string//$'\e[0m'}")"
+    length="$(strip_sequences "$string")"
+    length="${#length}"
+
+    # Format the output.
+    string="${string/:/${reset}${colon_color}${separator:=:}${info_color}}"
+    string="${subtitle_color}${bold}${string}"
+
+    # Print the info.
+    printf '%b\n' "${text_padding:+\e[${text_padding}C}${zws}${string//\\n}${reset} "
+
+    # Calculate info height.
+    ((++info_height))
+
+    # Log that prin was used.
+    prin=1
+}
+
+trim() {
+    set -f
+    set -- $*
+    printf '%s\n' "${*//[[:space:]]/}"
+    set +f
+}
+
+trim_quotes() {
+    return
+}
+
+strip_sequences() {
+    return
+}
+
+err() {
+    err+="$(color 1)[!]${reset} $1
+"
+}
+
+cache_uname() {
+    IFS=" " read -ra uname <<< "$(uname -srm)"
+    kernel_name="${uname[0]}"
+    kernel_version="${uname[1]}"
+    kernel_machine="${uname[2]}"
+}
+
+main() {
+    cache_uname
+    get_os
+    eval "$config"
+    print_info
+}
+
+main "$@"
